@@ -1,0 +1,176 @@
+openapi: 3.1.0
+info:
+  title: Swarm ↔ Master Architecture Delta
+  version: 1.0.0
+  description: |
+    Delta specification describing the API and behavior gaps between the
+    existing Swarm API surface and the Master Architecture (v7 unified orchestration).
+
+x-delta:
+  generated_at: '2026-03-30'
+  source:
+    swarm: ProcureNet-Swarm API v1.0.0
+    master: ProcureNet Master Architecture v7.0.1
+
+missing_in_swarm:
+  - path: /api/v7/sessions/{id}/prefill
+    method: GET
+    priority: high
+    reason: Known profile optimization for WCS ≥100
+    required_behaviors:
+      - Must only return prefill payload for resolved profile sessions.
+      - Must enforce bearerAuth with session scoping.
+  - path: /api/v7/sessions/{id}/escrow-accept
+    method: POST
+    priority: critical
+    reason: Legal compliance for high-value transactions
+    required_behaviors:
+      - Must verify transaction threshold policy for high-value purchases.
+      - Must write immutable audit trail entry before acceptance.
+  - path: /webhooks/procurement
+    method: POST
+    priority: critical
+    reason: Procurement Express approval bridge
+    required_behaviors:
+      - Must validate signed payload (SEC-001/SEC-002 compatible verification).
+      - Must support resume of suspended orchestration flow.
+  - path: /api/v7/sessions/{id}/transition
+    method: POST
+    priority: high
+    reason: State machine enforcement
+    required_behaviors:
+      - Must reject illegal transitions with deterministic error code.
+      - Must emit transition event for observability pipeline.
+
+to_be_deprecated_in_swarm:
+  - path: /api/payments/route
+    method: POST
+    reason: Replaced by orchestrator funding priority queue
+    migration: Use /api/v7/orchestrate then /api/v7/sessions/{id}/funding-method
+
+alignment_required:
+  - field: WCS Score Calculation
+    swarm_status: Not implemented
+    master_spec: 'Weights: CustomerID=100, Email=40, Phone=40, DeviceID=20'
+    priority: critical
+  - field: Transport Selection
+    swarm_status: HTTP only
+    master_spec: SSE for resolved, WS for partial/anonymous
+    priority: high
+  - field: Webhook Security
+    swarm_status: Basic auth
+    master_spec: SEC-001/SEC-002 signature + HMAC verification
+    priority: critical
+
+paths:
+  /api/v7/orchestrate:
+    post:
+      summary: Unified orchestration with WCS resolution
+      operationId: orchestrateV7
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestratorInput'
+      responses:
+        '200':
+          description: Orchestration accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestratorResult'
+  /api/v7/sessions/{id}/prefill:
+    get:
+      summary: Prefill data for resolved profiles (WCS ≥100)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Prefill payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrefillPayload'
+        '403':
+          description: Session not eligible for prefill
+  /webhooks/procurement:
+    post:
+      summary: Procurement Express approval callback
+      security:
+        - signatureAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalPayload'
+      responses:
+        '204':
+          description: Callback accepted
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    signatureAuth:
+      type: apiKey
+      in: header
+      name: x-procure-signature
+  schemas:
+    OrchestratorInput:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+        hints:
+          type: object
+          additionalProperties: true
+    OrchestratorResult:
+      type: object
+      required: [session_id, wcs_score, mode, transport]
+      properties:
+        session_id:
+          type: string
+        wcs_score:
+          type: integer
+        mode:
+          type: string
+          enum: [resolved, partial, anonymous]
+        transport:
+          type: string
+          enum: [sse, websocket]
+    PrefillPayload:
+      type: object
+      properties:
+        customer:
+          type: object
+          additionalProperties: true
+        payment_preferences:
+          type: array
+          items:
+            type: string
+    ApprovalPayload:
+      type: object
+      required: [session_id, decision, actor]
+      properties:
+        session_id:
+          type: string
+        decision:
+          type: string
+          enum: [approved, rejected]
+        actor:
+          type: string
+        reason:
+          type: string
