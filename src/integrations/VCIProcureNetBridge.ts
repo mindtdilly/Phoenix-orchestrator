@@ -129,6 +129,11 @@ export class VCIProcureNetBridge {
         return;
       }
 
+      const existingPaymentId = this.getMetadataString(record, 'procurenet_payment_id');
+      if (existingPaymentId) {
+        return;
+      }
+
       const amount = this.calculateEvaluationValue(record);
       if (amount <= 0) {
         return;
@@ -194,6 +199,11 @@ export class VCIProcureNetBridge {
     }
 
     return result;
+  }
+
+  private getMetadataString(record: VCISyncRecord, key: string): string | undefined {
+    const value = record.metadata?.[key];
+    return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
   }
 
   private calculateEvaluationValue(record: VCISyncRecord): number {
