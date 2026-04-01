@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://procurenet.local/schemas/claw-vector-store.schema.json",
+  "title": "Claw Vector Store (Local-First)",
+  "type": "object",
+  "required": ["version", "generatedAt", "indexes"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "indexes": {
+      "type": "object",
+      "required": ["translations", "contract_rules", "wcs_profiles", "entitlements"],
+      "properties": {
+        "translations": {
+          "$ref": "#/$defs/vectorIndex"
+        },
+        "contract_rules": {
+          "$ref": "#/$defs/vectorIndex"
+        },
+        "wcs_profiles": {
+          "$ref": "#/$defs/vectorIndex"
+        },
+        "entitlements": {
+          "$ref": "#/$defs/vectorIndex"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "vectorIndex": {
+      "type": "object",
+      "required": ["name", "type", "embeddingModel", "dimensions", "items"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["i18n", "validation", "scoring", "authorization"]
+        },
+        "embeddingModel": { "type": "string" },
+        "dimensions": { "type": "integer", "minimum": 1 },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "vector", "payload", "updatedAt"],
+            "properties": {
+              "id": { "type": "string" },
+              "vector": {
+                "type": "array",
+                "items": { "type": "number" },
+                "minItems": 1
+              },
+              "payload": { "type": "object" },
+              "updatedAt": { "type": "string", "format": "date-time" },
+              "ttlSeconds": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
