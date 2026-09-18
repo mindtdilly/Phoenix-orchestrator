@@ -1,83 +1,3 @@
-# Terraform sketch: Kubernetes + GPU LLaMA stack (beopen.ai oriented)
-# WARNING: See README.md — not apply-ready. kubernetes_node_pool is non-standard.
-
-terraform {
-  required_version = ">= 1.0"
-  required_providers {
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.20"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.10"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.5"
-    }
-  }
-}
-
-variable "cluster_id" {
-  description = "ID of the Kubernetes cluster on beopen.ai"
-  type        = string
-}
-
-variable "cluster_name" {
-  description = "Name of the Kubernetes cluster"
-  type        = string
-  default     = "llama-gpu-cluster"
-}
-
-variable "environment" {
-  description = "Environment name (dev, staging, prod)"
-  type        = string
-  default     = "dev"
-}
-
-variable "namespace" {
-  description = "Kubernetes namespace for LLaMA deployment"
-  type        = string
-  default     = "llama-api"
-}
-
-variable "docker_registry" {
-  description = "Docker registry for LLaMA images"
-  type        = string
-  default     = "docker.io"
-}
-
-variable "docker_username" {
-  description = "Docker registry username"
-  type        = string
-  sensitive   = true
-}
-
-variable "docker_password" {
-  description = "Docker registry password"
-  type        = string
-  sensitive   = true
-}
-
-variable "gpu_instance_type" {
-  description = "GPU instance type for nodes"
-  type        = string
-  default     = "nvidia-a100-gpu"
-}
-
-variable "gpu_node_count" {
-  description = "Number of GPU nodes in the cluster"
-  type        = number
-  default     = 3
-}
-
-variable "cpu_node_count" {
-  description = "Number of CPU nodes in the cluster"
-  type        = number
-  default     = 2
-}
-
 provider "kubernetes" {
   config_path = "~/.kube/config"
 }
@@ -86,6 +6,29 @@ provider "helm" {
   kubernetes {
     config_path = "~/.kube/config"
   }
+}
+
+# ---------------------------------------------------------------------------
+# Secrets: no hardcoded ArgoCD bcrypt / Grafana plaintext
+# Supply TF_VAR_argocd_admin_password / TF_VAR_grafana_admin_password, or
+# leave empty to auto-generate (see sensitive outputs).
+# ---------------------------------------------------------------------------
+
+resource "random_password" "argocd_admin" {
+  length           = 32
+  special          = true
+  override_special = "!@#%^&*()-_=+[]{}"
+}
+
+resource "random_password" "grafana_admin" {
+  length           = 32
+  special          = true
+  override_special = "!@#%^&*()-_=+[]{}"
+}
+
+locals {
+  argocd_admin_password  = var.argocd_admin_password != "" ? var.argocd_admin_password : random_password.argocd_admin.result
+  grafana_admin_password = var.grafana_admin_password != "" ? var.grafana_admin_password : random_password.grafana_admin.result
 }
 
 resource "random_id" "cluster_suffix" {
@@ -122,12 +65,6 @@ resource "kubernetes_namespace" "tekton_pipelines" {
     name = "tekton-pipelines"
   }
 }
-
-# NOTE: kubernetes_node_pool is NOT provided by hashicorp/kubernetes.
-# Left as documentation of intent; replace with your cloud node-pool resource.
-#
-# resource "kubernetes_node_pool" "gpu_pool" { ... }
-# resource "kubernetes_node_pool" "cpu_pool" { ... }
 
 resource "kubernetes_secret" "docker_registry" {
   metadata {
@@ -215,18 +152,16 @@ resource "helm_release" "argocd" {
   version    = "5.51.6"
   namespace  = kubernetes_namespace.argocd.metadata[0].name
 
-  # SECURITY: replace admin password before real use
+  # Admin password is NOT hardcoded. Chart creates argocd-initial-admin-secret
+  # on first install. After apply, rotate to the sensitive output:
+  #   terraform output -raw argocd_admin_password
+  #   argocd account update-password
+  # Or pre-hash with htpasswd and set configs.secret via a future overlay.
   values = [
     yamlencode({
       server = {
         service = {
           type = "LoadBalancer"
-        }
-      }
-      configs = {
-        secret = {
-          # bcrypt for "admin" — REPLACE
-          argocdServerAdminPassword = "$2a$10$rRyBsGSHK6.uc8fntPwVIuLVHgsAhAX7TcdrqW/XfUQtaodWiIbKi"
         }
       }
     })
@@ -249,14 +184,13 @@ resource "helm_release" "prometheus" {
   namespace        = "monitoring"
   create_namespace = true
 
-  # SECURITY: grafana adminPassword is placeholder
   values = [
     yamlencode({
       grafana = {
         service = {
           type = "LoadBalancer"
         }
-        adminPassword = "CHANGE_ME"
+        adminPassword = local.grafana_admin_password
       }
       prometheus = {
         prometheusSpec = {
@@ -380,6 +314,10 @@ resource "helm_release" "llama_api" {
     name  = "environment"
     value = var.environment
   }
+  set {
+    name  = "env.SOLANA_USDC_RECEIVE_ADDRESS"
+    value = var.solana_usdc_receive_address
+  }
 }
 
 resource "kubernetes_manifest" "argocd_app" {
@@ -395,9 +333,9 @@ resource "kubernetes_manifest" "argocd_app" {
     spec = {
       project = "default"
       source = {
-        repoURL        = "https://github.com/your-org/llama-api-mesh.git"
+        repoURL        = var.argocd_repo_url
         targetRevision = "HEAD"
-        path           = "helm/llama-api"
+        path           = "infra/llama-gpu-cluster/helm/llama-api"
       }
       destination = {
         server    = "https://kubernetes.default.svc"
@@ -481,42 +419,5 @@ resource "kubernetes_manifest" "tekton_pipeline" {
         }
       ]
     }
-  }
-}
-
-output "cluster_info" {
-  description = "Cluster information"
-  value = {
-    cluster_id   = var.cluster_id
-    cluster_name = var.cluster_name
-    environment  = var.environment
-    namespace    = kubernetes_namespace.llama_namespace.metadata[0].name
-  }
-}
-
-output "service_endpoints" {
-  description = "Service endpoints"
-  value = {
-    argocd_server = "kubectl get svc argocd-server -n argocd"
-    grafana       = "kubectl get svc prometheus-grafana -n monitoring"
-    llama_api     = "kubectl get svc llama-api -n ${var.namespace}"
-  }
-}
-
-output "gpu_nodes" {
-  description = "GPU node pool intent (resource not applied via this provider)"
-  value = {
-    intended_count = var.gpu_node_count
-    instance_type  = var.gpu_instance_type
-    note           = "Provision node pools via cloud/beopen provider — see README"
-  }
-}
-
-output "monitoring_info" {
-  description = "Monitoring stack information"
-  value = {
-    prometheus_url = "http://prometheus-server.monitoring.svc.cluster.local:9090"
-    grafana_url    = "http://prometheus-grafana.monitoring.svc.cluster.local:3000"
-    grafana_admin  = "set via values — do not use default admin"
   }
 }
