@@ -1,0 +1,57 @@
+replicaCount: 3
+
+image:
+  repository: docker.io/example/llama-api
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+environment: dev
+
+# Injected by Terraform helm_release set: env.SOLANA_USDC_RECEIVE_ADDRESS
+env:
+  SOLANA_USDC_RECEIVE_ADDRESS: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+
+resources:
+  limits:
+    nvidia.com/gpu: "1"
+    memory: 32Gi
+    cpu: "8"
+  requests:
+    memory: 16Gi
+    cpu: "4"
+
+nodeSelector:
+  gpu: "true"
+
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+
+affinity: {}
+
+ingress:
+  enabled: true
+  className: istio
+  hosts:
+    - host: llama-api.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
