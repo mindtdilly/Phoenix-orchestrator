@@ -1,0 +1,9 @@
+Category,Count,Examples
+Modern IDEs,45,"IntelliJ, VS Code, Android Studio, Xcode"
+Text Editors,287,"Vim, Emacs, Sublime, Zed, Helix, Kakoune"
+Web/Cloud IDEs,89,"Replit, Gitpod, CodeSandbox, StackBlitz"
+Mobile IDEs,34,"AIDE, Pythonista, Textastic, Spck"
+AI-Assisted,67,"Cursor, Windsurf, Claude Code, Aider"
+Specialized,412,"Unity, Unreal, Arduino, Jupyter, MATLAB"
+Terminal,156,"Vim, Emacs, Nano, Micro, Helix, Vis"
+Historical/Legacy,892,"WordStar, WordPerfect, Turbo Pascal, ed, ex"

@@ -1,0 +1,12 @@
+# Deploy / local state
+.deploy-state-mainnet/
+.deploy-state/
+.paymaster-state/
+*.tfstate
+*.tfstate.*
+.terraform/
+.venv/
+__pycache__/
+node_modules/
+dist/
+*.pyc
